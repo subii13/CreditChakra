@@ -43,7 +43,7 @@ services:
       - key: NODE_ENV
         value: development # see note at top of this file — intentional
       - key: NODE_VERSION
-        value: "20"
+        value: "22"
       - key: DATABASE_URL
         fromDatabase:
           name: creditchakra-x2nmew-db
