@@ -1,0 +1,85 @@
+# TEMPORARY deploy blueprint for Render (https://render.com), so
+# CreditChakra can be seen live in a browser without installing
+# anything locally. This is explicitly a throwaway demo config, not a
+# production deployment plan:
+#
+#   - Backend runs with NODE_ENV=development on purpose, which relaxes
+#     this app's CORS/CSRF origin allowlist (see backend/src/app.ts and
+#     backend/src/middleware/csrf.ts) and Helmet's CSP. That relaxation
+#     is intentionally scoped to non-production mode in the code; it's
+#     used here only to sidestep having to know the frontend's exact
+#     Render URL in advance. Do not reuse this file as-is for a real
+#     deployment — set NODE_ENV=production and a real
+#     CORS_ALLOWED_ORIGINS there instead.
+#   - LOCAL_AUTH_MODE=true — see SECURITY.md's "Temporary local auth
+#     mode." No real Supabase project is used.
+#   - Service names below must be globally unique on Render. If
+#     "creditchakra-x2nmew-*" is taken, Render will tell you at deploy
+#     time — rename it (and the matching VITE_API_BASE_URL value below)
+#     consistently and redeploy.
+#
+# To use: on render.com, New > Blueprint > select this repo/branch.
+
+databases:
+  - name: creditchakra-x2nmew-db
+    plan: free
+    databaseName: creditchakra
+    user: creditchakra
+
+services:
+  - type: web
+    name: creditchakra-x2nmew-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: >-
+      npm ci &&
+      npm run build --workspace backend &&
+      npx prisma generate --schema backend/prisma/schema.prisma &&
+      npx prisma db push --schema backend/prisma/schema.prisma --skip-generate --accept-data-loss &&
+      npm run seed --workspace backend
+    startCommand: node backend/dist/server.js
+    envVars:
+      - key: NODE_ENV
+        value: development # see note at top of this file — intentional
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: creditchakra-x2nmew-db
+          property: connectionString
+      - key: SUPABASE_URL
+        value: https://placeholder-temporary-demo.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: temporary-demo-placeholder-anon-key
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        value: temporary-demo-placeholder-service-role-key
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: LOCAL_AUTH_MODE
+        value: "true"
+      - key: CORS_ALLOWED_ORIGINS
+        value: "*" # unused while NODE_ENV=development; harmless placeholder
+
+  - type: web
+    name: creditchakra-x2nmew-web
+    runtime: static
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npm run build --workspace frontend
+    staticPublishPath: frontend/dist
+    envVars:
+      - key: VITE_SUPABASE_URL
+        value: https://placeholder-temporary-demo.supabase.co
+      - key: VITE_SUPABASE_PUBLISHABLE_KEY
+        value: temporary-demo-placeholder-anon-key
+      - key: VITE_API_BASE_URL
+        value: https://creditchakra-x2nmew-api.onrender.com/api
+      - key: VITE_LOCAL_AUTH_MODE
+        value: "true"
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
