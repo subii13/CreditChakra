@@ -1,0 +1,16 @@
+title = "CreditChakra gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known-safe placeholder patterns"
+paths = [
+  '''\.env\.example$''',
+  '''SECURITY\.md$''',
+  '''DATA_SOURCES\.md$''',
+]
+regexes = [
+  '''your-.*-here''',
+  '''<[A-Z0-9_-]+>''',
+]

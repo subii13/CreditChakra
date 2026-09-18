@@ -1,0 +1,22 @@
+{
+  "name": "creditchakra",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "build": "npm run build --workspace backend && npm run build --workspace frontend",
+    "test": "npm run test --workspace backend --if-present && npm run test --workspace frontend --if-present",
+    "lint": "npm run lint --workspace backend --if-present && npm run lint --workspace frontend --if-present",
+    "typecheck": "npm run typecheck --workspace backend --if-present && npm run typecheck --workspace frontend --if-present",
+    "prepare": "node scripts/install-hooks.js",
+    "security:secrets": "bash scripts/security-secrets.sh",
+    "security:deps": "bash scripts/security-deps.sh",
+    "security:check": "npm run security:secrets && npm run security:deps && npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "devDependencies": {}
+}

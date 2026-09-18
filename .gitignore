@@ -1,0 +1,48 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Supabase local
+supabase/.temp/
+supabase/.branches/
+
+# Prisma
+backend/prisma/migrations/dev.db*
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage artifacts
+.nyc_output/
+playwright-report/
+test-results/
+
+# Misc
+*.tsbuildinfo
+.turbo/

@@ -1,0 +1,453 @@
+// CreditChakra data model.
+//
+// This schema targets Supabase Postgres. Row Level Security is NOT
+// managed by Prisma migrations — it lives in
+// backend/prisma/sql/001_rls_policies.sql and must be applied to the
+// same database after `prisma migrate deploy`. Every user-owned table
+// below carries a userId column that RLS policies compare against
+// auth.uid(); the Express API additionally re-derives ownership from
+// the authenticated session on every request (see src/middleware/auth.ts)
+// rather than trusting client-supplied ids.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------
+
+enum Goal {
+  EDUCATION
+  BUSINESS_START
+  BUSINESS_EXPANSION
+  LIVELIHOOD
+  EQUIPMENT
+  OTHER
+}
+
+enum DecisionType {
+  ELIGIBLE_MATCH
+  PARTIAL_MATCH
+  NOT_ELIGIBLE
+  INSUFFICIENT_DATA
+}
+
+// Provenance status for a scheme rule figure. Never invent a value —
+// mark UNVERIFIED when a current official figure could not be confirmed
+// (see Section 43 of the product spec / DATA_SOURCES.md).
+enum VerificationStatus {
+  VERIFIED
+  UNVERIFIED
+}
+
+// Shown in the UI next to any figure/record so users know what kind of
+// data they're looking at.
+enum DataStatus {
+  VERIFIED_OFFICIAL
+  DEMO_DATA
+  ESTIMATE
+  USER_PROVIDED
+  UNVERIFIED
+}
+
+enum RuleType {
+  INCOME_CEILING
+  PROJECT_COST_CEILING
+  LOAN_CEILING
+  INTEREST_RATE
+  TENURE_MAX
+  MORATORIUM
+  CATEGORY
+  AGE_RANGE
+  PURPOSE
+  OTHER
+}
+
+enum SchemeSourceProvider {
+  NSFDC
+  MYSCHEME
+  DEMO
+}
+
+enum ChecklistItemStatus {
+  PENDING
+  COMPLETED
+}
+
+// ---------------------------------------------------------------------
+// User-owned data
+// ---------------------------------------------------------------------
+
+// One applicant profile per onboarding submission. userId is derived
+// from the authenticated Supabase session server-side; it is never
+// accepted from the request body (see src/validation/applicant.ts).
+model ApplicantProfile {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  goal             Goal
+  fullName         String
+  state            String
+  district         String
+  category         String
+  isScCategory     Boolean @default(true)
+  age              Int?
+  familyIncome     Int // annual, INR
+  isStudent        Boolean @default(false)
+  isEntrepreneur   Boolean @default(false)
+  hasExistingBusiness Boolean @default(false)
+  purpose          String?
+
+  // Goal-specific fields (nullable; only the ones relevant to `goal`
+  // are populated — see src/validation/applicant.ts visibleWhen rules)
+  educationLevel      String?
+  courseType           String?
+  courseCost           Int?
+  businessType         String?
+  existingBusinessType String?
+  yearsInOperation     Int?
+  activityType         String?
+  equipmentType        String?
+  equipmentCost        Int?
+
+  // Financial ask
+  projectCost            Int
+  requestedLoanAmount    Int
+  preferredTenureMonths  Int
+
+  // Encrypted free-text contact field (AES-256-GCM, application-level).
+  // Ciphertext + IV + auth tag are stored together; see src/lib/crypto.ts.
+  contactInfoEncrypted String?
+
+  recommendations   Recommendation[]
+  simulations       Simulation[]
+  checklists        ApplicationChecklist[]
+  reports           Report[]
+  partnerInteractions PartnerInteraction[]
+
+  @@index([userId])
+  @@map("applicant_profiles")
+}
+
+model Recommendation {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  applicantProfileId String   @db.Uuid
+  createdAt          DateTime @default(now())
+
+  schemeId      String   @db.Uuid
+  decisionType  DecisionType
+  matchScore    Int // 0-100, "CreditChakra Match" — not a credit score
+  matchedCriteria Json
+  failedHardCriteria Json
+  warnings      Json
+  explanation   String
+  evidenceReferences Json
+
+  applicantProfile ApplicantProfile @relation(fields: [applicantProfileId], references: [id], onDelete: Cascade)
+  scheme           Scheme           @relation(fields: [schemeId], references: [id])
+  ruleEvaluations  RuleEvaluation[]
+  emiCalculations  EmiCalculation[]
+  simulations      Simulation[]
+
+  @@index([userId])
+  @@index([applicantProfileId])
+  @@map("recommendations")
+}
+
+model RuleEvaluation {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  recommendationId String   @db.Uuid
+  createdAt        DateTime @default(now())
+
+  ruleId       String  @db.Uuid
+  passed       Boolean
+  isHardRule   Boolean
+  actualValue  String
+  requiredValue String
+  explanation  String
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  rule           EligibilityRule @relation(fields: [ruleId], references: [id])
+
+  @@index([userId])
+  @@index([recommendationId])
+  @@map("rule_evaluations")
+}
+
+// A What-If run: base recommendation + allowlisted field changes +
+// resulting modified recommendation + computed delta.
+model Simulation {
+  id                   String   @id @default(uuid()) @db.Uuid
+  userId               String   @db.Uuid
+  applicantProfileId   String   @db.Uuid
+  baseRecommendationId String   @db.Uuid
+  createdAt            DateTime @default(now())
+
+  changedFields      Json // allowlisted fields only, e.g. { familyIncome: 250000 }
+  modifiedDecisionType DecisionType
+  modifiedMatchScore Int
+  modifiedSchemeId   String @db.Uuid
+  changedRules       Json
+  financialDelta     Json
+  deltaReason         String
+
+  applicantProfile   ApplicantProfile @relation(fields: [applicantProfileId], references: [id], onDelete: Cascade)
+  baseRecommendation Recommendation   @relation(fields: [baseRecommendationId], references: [id], onDelete: Cascade)
+  emiCalculations    EmiCalculation[]
+
+  @@index([userId])
+  @@index([applicantProfileId])
+  @@map("simulations")
+}
+
+model EmiCalculation {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  recommendationId String?  @db.Uuid
+  simulationId     String?  @db.Uuid
+  createdAt        DateTime @default(now())
+
+  principal            Int
+  annualInterestRate   Float
+  tenureMonths         Int
+  moratoriumMonths      Int
+  estimatedPayment     Int
+  totalInterest        Int
+  totalRepayment       Int
+  repaymentMonths      Int
+  schedule             Json
+  assumptions          Json
+  dataStatus           DataStatus @default(ESTIMATE)
+
+  recommendation Recommendation? @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  simulation     Simulation?     @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("emi_calculations")
+}
+
+model AiConversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  applicantProfileId String? @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages AiMessage[]
+
+  @@index([userId])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  userId         String   @db.Uuid
+  conversationId String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  role      String // "user" | "assistant"
+  content   String
+  evidence  Json?
+  source    String // "deterministic" | "llm"
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([conversationId])
+  @@map("ai_messages")
+}
+
+model ApplicationChecklist {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  applicantProfileId String   @db.Uuid
+  schemeId           String   @db.Uuid
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  items Json // [{ key, label, status, completedAt }]
+
+  applicantProfile ApplicantProfile @relation(fields: [applicantProfileId], references: [id], onDelete: Cascade)
+  scheme           Scheme           @relation(fields: [schemeId], references: [id])
+
+  @@unique([applicantProfileId, schemeId])
+  @@index([userId])
+  @@map("application_checklists")
+}
+
+model Report {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  applicantProfileId String   @db.Uuid
+  recommendationId   String   @db.Uuid
+  createdAt          DateTime @default(now())
+
+  content Json // full structured report payload (Section 78)
+
+  applicantProfile ApplicantProfile @relation(fields: [applicantProfileId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reports")
+}
+
+model PartnerInteraction {
+  id                 String   @id @default(uuid()) @db.Uuid
+  userId             String   @db.Uuid
+  applicantProfileId String   @db.Uuid
+  partnerId          String   @db.Uuid
+  createdAt          DateTime @default(now())
+
+  suitabilityScore Int
+  schemeId         String @db.Uuid
+
+  applicantProfile ApplicantProfile @relation(fields: [applicantProfileId], references: [id], onDelete: Cascade)
+  partner          Partner          @relation(fields: [partnerId], references: [id])
+
+  @@index([userId])
+  @@map("partner_interactions")
+}
+
+model AuditEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  createdAt DateTime @default(now())
+
+  eventType String // e.g. "LOGIN", "LOGIN_FAILED", "REPORT_GENERATED"
+  metadata  Json? // never store secrets/full financial payloads here
+
+  @@index([userId])
+  @@index([eventType])
+  @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------
+// Public / low-sensitivity reference data
+// ---------------------------------------------------------------------
+
+model Scheme {
+  id          String   @id @default(uuid()) @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  slug        String   @unique
+  name        String
+  provider    SchemeSourceProvider @default(NSFDC)
+  category    String // "education" | "micro-finance" | "term-loan" | "livelihood" | "equipment"
+  description String
+  isPrimary   Boolean  @default(true) // primary NSFDC schemes vs secondary myScheme entries
+
+  rules            EligibilityRule[]
+  sources          SchemeSource[]
+  recommendations  Recommendation[]
+  partnerSchemes   PartnerScheme[]
+  checklistDefs    ChecklistDefinition[]
+  applicationChecklists ApplicationChecklist[]
+
+  @@map("schemes")
+}
+
+model EligibilityRule {
+  id       String   @id @default(uuid()) @db.Uuid
+  schemeId String   @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ruleType     RuleType
+  isHardRule   Boolean @default(true)
+  // Numeric rules use value/comparator; categorical rules use
+  // stringValue instead (e.g. CATEGORY -> "SC").
+  comparator   String? // "LTE" | "LT" | "GTE" | "GT" | "EQ"
+  value        Float?
+  stringValue  String?
+  unit         String? // "INR" | "PERCENT" | "MONTHS" | "YEARS" | null
+  label        String
+  explanation  String
+
+  sourceId         String @db.Uuid
+  effectiveFrom    DateTime
+  lastVerified     DateTime
+  verificationStatus VerificationStatus @default(UNVERIFIED)
+  verificationNotes  String?
+
+  scheme          Scheme          @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  source          SchemeSource    @relation(fields: [sourceId], references: [id])
+  ruleEvaluations RuleEvaluation[]
+
+  @@index([schemeId])
+  @@map("eligibility_rules")
+}
+
+model SchemeSource {
+  id        String   @id @default(uuid()) @db.Uuid
+  schemeId  String   @db.Uuid
+  createdAt DateTime @default(now())
+
+  name       String // e.g. "NSFDC official scheme page"
+  url        String
+  provider   SchemeSourceProvider @default(NSFDC)
+  retrievedAt DateTime
+
+  scheme Scheme            @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  rules  EligibilityRule[]
+
+  @@index([schemeId])
+  @@map("scheme_sources")
+}
+
+model ChecklistDefinition {
+  id       String @id @default(uuid()) @db.Uuid
+  schemeId String @db.Uuid
+
+  itemKey     String
+  label       String
+  description String
+  sortOrder   Int @default(0)
+
+  scheme Scheme @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+
+  @@unique([schemeId, itemKey])
+  @@map("checklist_definitions")
+}
+
+model Partner {
+  id        String   @id @default(uuid()) @db.Uuid
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  name              String
+  type              String // "SCA" | "NBFC-MFI" | "Cooperative Bank" | "Small Finance Bank"
+  state             String
+  district           String
+  latitude           Float?
+  longitude          Float?
+  isVerifiedAuthorization Boolean @default(false)
+  authorizationSource     String?
+  dataStatus              DataStatus @default(DEMO_DATA)
+
+  partnerSchemes      PartnerScheme[]
+  partnerInteractions PartnerInteraction[]
+
+  @@map("partners")
+}
+
+model PartnerScheme {
+  id        String @id @default(uuid()) @db.Uuid
+  partnerId String @db.Uuid
+  schemeId  String @db.Uuid
+
+  partner Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  scheme  Scheme  @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, schemeId])
+  @@map("partner_schemes")
+}
