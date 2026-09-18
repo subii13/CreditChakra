@@ -66,8 +66,6 @@ services:
   - type: web
     name: creditchakra-x2nmew-web
     runtime: static
-    plan: free
-    region: oregon
     buildCommand: npm ci && npm run build --workspace frontend
     staticPublishPath: frontend/dist
     envVars:
