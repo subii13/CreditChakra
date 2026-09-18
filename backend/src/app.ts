@@ -39,11 +39,17 @@ export function createApp() {
   app.use(securityHeaders);
   app.use(extraSecurityHeaders);
 
-  // No wildcard CORS for an authenticated API (Section 18).
+  // No wildcard CORS for an authenticated API in production (Section
+  // 18). In development, this sandbox's frontend is reached through a
+  // proxied/forwarded hostname that isn't known ahead of time and
+  // isn't "localhost:5173" from the browser's point of view, so we
+  // reflect whatever Origin is sent rather than guessing it — never in
+  // production, where the real deployed frontend origin IS known and
+  // must be allowlisted via CORS_ALLOWED_ORIGINS.
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || corsAllowedOrigins.includes(origin)) {
+        if (!isProduction || !origin || corsAllowedOrigins.includes(origin)) {
           callback(null, true);
           return;
         }
