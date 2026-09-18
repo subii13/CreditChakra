@@ -34,8 +34,8 @@ services:
     region: oregon
     buildCommand: >-
       npm ci &&
-      npm run build --workspace backend &&
       npx prisma generate --schema backend/prisma/schema.prisma &&
+      npm run build --workspace backend &&
       npx prisma db push --schema backend/prisma/schema.prisma --skip-generate --accept-data-loss &&
       npm run seed --workspace backend
     startCommand: node backend/dist/server.js
