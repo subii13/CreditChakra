@@ -105,6 +105,44 @@ figures ship as `UNVERIFIED` rather than invented.
 | Privilege escalation | No role/admin concept exposed to clients; service-role key is server-only and used only for auth verification + seeding | `backend/src/lib/supabaseAdmin.ts` |
 | Sensitive data exposure at rest | AES-256-GCM for free-text contact info; income/project-cost figures are not treated as needing field-level encryption (they're needed for the rule engine to run, and are protected by RLS + ownership instead) | `backend/tests/crypto.test.ts` |
 
+## Temporary local auth mode
+
+Set `LOCAL_AUTH_MODE=true` (backend) and `VITE_LOCAL_AUTH_MODE=true`
+(frontend) to run the whole app — including login-gated pages — with
+**no Supabase project at all**. This exists because two things were
+unavailable while building this app in a sandboxed environment: a real
+Supabase cloud project (needs your account) and Supabase's local
+Docker stack (this sandbox's network policy blocks the image pulls).
+It is explicitly a throwaway, requested and scoped as temporary, not a
+second production auth system:
+
+- **Backend** (`backend/src/lib/localAuth.ts`): email/password stored
+  in a dedicated `local_auth_users` table, hashed with Node's built-in
+  `scrypt` (not Argon2id — deliberately avoiding a native-compiled
+  dependency for a path meant to be deleted). Sessions are a small
+  HMAC-signed token (`SESSION_SECRET`), 24h expiry, no refresh flow.
+  `backend/src/middleware/auth.ts` and `backend/src/routes/auth.ts`
+  each have one `if (env.LOCAL_AUTH_MODE)` branch; everything else
+  (ownership checks, RLS, rate limiting, validation) is unchanged and
+  still applies on top.
+- **Frontend** (`frontend/src/lib/authSession.ts`): the access token
+  is kept in `sessionStorage` under a clearly-named key, instead of
+  Supabase's own session handling — a deliberate, temporary exception
+  to the "no long-lived tokens in browser storage" rule (Section
+  16/101), scoped only to this shim.
+- **Database:** `local_auth_users` has RLS enabled with zero client
+  policies (same treatment as `audit_events`) — no anon/authenticated
+  request can read a password hash through PostgREST, whether or not
+  the shim is active.
+
+**To remove it** once a real Supabase project is wired in: delete
+`backend/src/lib/localAuth.ts` and `frontend/src/lib/authSession.ts`'s
+local branch, remove the `LOCAL_AUTH_MODE`/`VITE_LOCAL_AUTH_MODE`
+branches in `backend/src/middleware/auth.ts`,
+`backend/src/routes/auth.ts`, `frontend/src/context/AuthContext.tsx`,
+and `frontend/src/lib/apiClient.ts`, drop the `LocalAuthUser` model and
+its RLS policy block, and delete the env vars.
+
 ## Known limitations of this build
 
 This is an SIH prototype, not a production deployment. Being explicit

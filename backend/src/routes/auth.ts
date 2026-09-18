@@ -4,6 +4,8 @@ import { supabaseAnon } from "../lib/supabaseAnon";
 import { authLimiter } from "../middleware/rateLimit";
 import { requireAuth } from "../middleware/auth";
 import { prisma } from "../lib/prisma";
+import { env } from "../config/env";
+import { hashPassword, signLocalToken, verifyPassword } from "../lib/localAuth";
 
 const router = Router();
 
@@ -19,6 +21,25 @@ const GENERIC_AUTH_ERROR = "Invalid email or password, or the account could not 
 router.post("/register", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = credentialsSchema.parse(req.body);
+
+    // TEMPORARY branch — see SECURITY.md's "Temporary local auth mode".
+    if (env.LOCAL_AUTH_MODE) {
+      const existing = await prisma.localAuthUser.findUnique({ where: { email } });
+      if (existing) {
+        res.status(400).json({ success: false, error: { code: "INVALID_INPUT", message: GENERIC_AUTH_ERROR } });
+        return;
+      }
+      const passwordHash = await hashPassword(password);
+      const user = await prisma.localAuthUser.create({ data: { email, passwordHash } });
+      await prisma.auditEvent.create({ data: { userId: user.id, eventType: "REGISTER" } }).catch(() => undefined);
+      const { token, expiresAt } = signLocalToken(user.id, user.email);
+      res.status(201).json({
+        success: true,
+        data: { user: { id: user.id, email: user.email }, session: { accessToken: token, expiresAt } },
+      });
+      return;
+    }
+
     const { data, error } = await supabaseAnon.auth.signUp({ email, password });
 
     if (error || !data.user) {
@@ -43,6 +64,25 @@ router.post("/register", authLimiter, async (req, res, next) => {
 router.post("/login", authLimiter, async (req, res, next) => {
   try {
     const { email, password } = credentialsSchema.parse(req.body);
+
+    // TEMPORARY branch — see SECURITY.md's "Temporary local auth mode".
+    if (env.LOCAL_AUTH_MODE) {
+      const user = await prisma.localAuthUser.findUnique({ where: { email } });
+      const valid = user ? await verifyPassword(password, user.passwordHash) : false;
+      if (!user || !valid) {
+        await prisma.auditEvent.create({ data: { eventType: "LOGIN_FAILED" } }).catch(() => undefined);
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: GENERIC_AUTH_ERROR } });
+        return;
+      }
+      await prisma.auditEvent.create({ data: { userId: user.id, eventType: "LOGIN" } }).catch(() => undefined);
+      const { token, expiresAt } = signLocalToken(user.id, user.email);
+      res.json({
+        success: true,
+        data: { user: { id: user.id, email: user.email }, session: { accessToken: token, expiresAt } },
+      });
+      return;
+    }
+
     const { data, error } = await supabaseAnon.auth.signInWithPassword({ email, password });
 
     if (error || !data.session) {

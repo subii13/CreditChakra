@@ -115,6 +115,15 @@ create policy partner_interactions_insert_own on partner_interactions
 -- from the actual security team). Intentionally: zero policies here
 -- beyond RLS being enabled, so anon/authenticated get nothing.
 
+-- local_auth_users: TEMPORARY (LOCAL_AUTH_MODE only) — holds password
+-- hashes for the local-dev auth shim. Same treatment as audit_events:
+-- RLS enabled, zero client policies, so no anon/authenticated request
+-- can ever read a password hash through PostgREST. Only the backend's
+-- own Prisma connection (a privileged role, not anon/authenticated)
+-- reads/writes it directly.
+alter table local_auth_users enable row level security;
+alter table local_auth_users force row level security;
+
 -- ---------------------------------------------------------------------
 -- Public / low-sensitivity reference tables
 -- ---------------------------------------------------------------------

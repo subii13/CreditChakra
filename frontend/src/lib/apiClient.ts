@@ -1,4 +1,4 @@
-import { supabase } from "./supabaseClient";
+import { getAccessToken } from "./authSession";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
@@ -20,8 +20,7 @@ export class ApiError extends Error {
 // token stored by our own code, and never a userId the backend is
 // asked to trust (the backend re-derives identity from this token).
 async function authHeader(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  const token = await getAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

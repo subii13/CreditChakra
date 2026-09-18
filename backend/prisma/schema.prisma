@@ -317,6 +317,26 @@ model PartnerInteraction {
   @@map("partner_interactions")
 }
 
+// TEMPORARY (LOCAL_AUTH_MODE only). Holds local email/password accounts
+// used ONLY when LOCAL_AUTH_MODE=true (see backend/src/config/env.ts
+// and backend/src/lib/localAuth.ts), so the app can be clicked through
+// end-to-end without a real Supabase project. When LOCAL_AUTH_MODE is
+// off (the default), this table exists but is never read or written.
+// RLS locks it down with zero client policies either way (see
+// backend/prisma/sql/001_rls_policies.sql). To remove this shim later:
+// delete this model + its migration, backend/src/lib/localAuth.ts, the
+// LOCAL_AUTH_MODE branches in src/middleware/auth.ts and
+// src/routes/auth.ts, and the mirrored frontend pieces (see
+// frontend/src/lib/authSession.ts).
+model LocalAuthUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  @@map("local_auth_users")
+}
+
 model AuditEvent {
   id        String   @id @default(uuid()) @db.Uuid
   userId    String?  @db.Uuid

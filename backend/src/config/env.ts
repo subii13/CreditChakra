@@ -14,6 +14,17 @@ const envSchema = z.object({
   SESSION_SECRET: z.string().min(1),
   LLM_API_KEY: z.string().optional().default(""),
   TURNSTILE_SECRET_KEY: z.string().optional().default(""),
+
+  // TEMPORARY: when true, auth bypasses Supabase entirely in favor of
+  // a local email/password shim (backend/src/lib/localAuth.ts) so the
+  // app can be run end-to-end without a real Supabase project. Off by
+  // default. See SECURITY.md's "Temporary local auth mode" section
+  // before using this anywhere but a local demo.
+  LOCAL_AUTH_MODE: z
+    .string()
+    .optional()
+    .default("false")
+    .transform((v) => v === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;
